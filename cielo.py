@@ -1,18 +1,26 @@
 from playwright.sync_api import sync_playwright
 
-found = set()
+interesting = []
+
+KEYWORDS = [
+    "token",
+    "auth",
+    "play",
+    "playback",
+    "stream",
+    "video",
+    "live",
+    "channel",
+    "manifest",
+    "session",
+    "api"
+]
 
 def handle_response(response):
-    url = response.url
+    url = response.url.lower()
 
-    if any(x in url.lower() for x in [
-        ".m3u8",
-        ".mpd",
-        "manifest",
-        "playlist",
-        "master"
-    ]):
-        found.add(url)
+    if any(k in url for k in KEYWORDS):
+        interesting.append(f"{response.status} | {response.url}")
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
@@ -29,14 +37,11 @@ with sync_playwright() as p:
         timeout=60000
     )
 
-    page.wait_for_timeout(15000)
+    page.wait_for_timeout(20000)
 
     browser.close()
 
-print("\n=== RISULTATI ===\n")
+print("\n=== RICHIESTE INTERESSANTI ===\n")
 
-if found:
-    for url in sorted(found):
-        print(url)
-else:
-    print("Nessun flusso trovato")
+for item in sorted(set(interesting)):
+    print(item)
