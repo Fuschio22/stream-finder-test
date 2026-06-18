@@ -3,13 +3,9 @@ import re
 
 def main():
     stream_urls = []
-    all_responses = []
 
     def handle_response(response):
         url = response.url
-        all_responses.append(url)
-        
-        # Cattura QUALSIASI flusso m3u8 o mpd
         if ".m3u8" in url or ".mpd" in url:
             stream_urls.append(url)
             print(f"🎯 Flusso trovato: {url}")
@@ -27,70 +23,102 @@ def main():
             print("🌐 Caricamento della pagina in corso...")
             page.goto("https://www.cielotv.it/streaming", wait_until="domcontentloaded", timeout=60000)
             
-            # Aspetta che la pagina sia completamente caricata
-            page.wait_for_timeout(5000)
+            # Aspetta che la pagina si carichi
+            page.wait_for_timeout(3000)
             
-            # Cerca iframe che potrebbero contenere il player
+            # GESTIONE COOKIE CONSENT - Prova diversi metodi
+            print("🍪 Gestione cookie consent...")
+            
+            # Metodo 1: Cerca e clicca il pulsante "Accetta" o "Accetta tutti"
+            try:
+                accept_buttons = page.locator('button:has-text("Accetta"), button:has-text("Accept"), button:has-text("consenti"), [id*="accept"], [class*="accept"]')
+                if accept_buttons.count() > 0:
+                    accept_buttons.first.click()
+                    print("✅ Cookie accettati (metodo 1)")
+                    page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"⚠️ Metodo 1 fallito: {e}")
+            
+            # Metodo 2: Inietta JavaScript per accettare automaticamente
+            try:
+                page.evaluate("""
+                    // Prova a trovare e cliccare pulsanti di accettazione
+                    const buttons = document.querySelectorAll('button');
+                    for (let btn of buttons) {
+                        const text = btn.textContent.toLowerCase();
+                        if (text.includes('accetta') || text.includes('accept') || text.includes('consenti') || text.includes('ok')) {
+                            btn.click();
+                            break;
+                        }
+                    }
+                    
+                    // Prova a impostare cookie di consenso manualmente
+                    document.cookie = "consent=true; path=/; max-age=31536000";
+                    document.cookie = "gdpr_consent=given; path=/; max-age=31536000";
+                """)
+                print("✅ Cookie gestiti via JavaScript")
+                page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"⚠️ Metodo 2 fallito: {e}")
+            
+            # Metodo 3: Cerca iframe del player e interagisci con esso
+            print("🔍 Ricerca player video...")
             frames = page.frames
-            print(f"📊 Trovati {len(frames)} frame nella pagina")
+            print(f"📊 Trovati {len(frames)} frame")
             
-            for i, frame in enumerate(frames):
-                print(f"🔍 Frame {i}: {frame.url}")
-                # Aspetta un po' per permettere il caricamento dei flussi in ogni frame
-                page.wait_for_timeout(3000)
+            for frame in frames:
+                try:
+                    # Cerca pulsanti play o video in ogni frame
+                    play_button = frame.locator('video, [class*="player"], [id*="player"], button:has-text("Play")')
+                    if play_button.count() > 0:
+                        print(f"✅ Trovato player in frame: {frame.url[:80]}")
+                        # Prova a cliccare play
+                        try:
+                            play_button.first.click(timeout=3000)
+                            print("▶️ Play cliccato")
+                        except:
+                            pass
+                except:
+                    pass
             
-            # Aspetta ancora per dare tempo al player di caricarsi
-            print("⏳ Attesa aggiuntiva per il caricamento del player...")
-            page.wait_for_timeout(15000)
+            # Aspetta che il player si carichi completamente
+            print("⏳ Attesa caricamento player...")
+            page.wait_for_timeout(20000)
             
-            # Prova anche a cercare il flusso nel codice sorgente della pagina
+            # Cerca anche nel codice sorgente
             print("🔎 Ricerca nel codice sorgente...")
             content = page.content()
-            
-            # Cerca URL m3u8 nel codice HTML
             m3u8_matches = re.findall(r'https?://[^\s"\']+\.m3u8[^\s"\']*', content)
             if m3u8_matches:
-                print(f"🎯 Trovati {len(m3u8_matches)} URL m3u8 nel codice sorgente")
-                for match in m3u8_matches[:5]:  # Mostra i primi 5
-                    print(f"   - {match}")
+                print(f"🎯 Trovati {len(m3u8_matches)} URL m3u8 nel codice")
+                for match in m3u8_matches[:5]:
+                    print(f"   - {match[:100]}")
                     if match not in stream_urls:
                         stream_urls.append(match)
             
         except Exception as e:
-            print(f"⚠️ Errore di caricamento: {e}")
+            print(f"⚠️ Errore: {e}")
         
         browser.close()
-
-    # Debug: mostra tutte le response catturate
-    print(f"\n📊 Totale response catturate: {len(all_responses)}")
-    if len(all_responses) > 0:
-        print("📋 Ultime 10 response:")
-        for url in all_responses[-10:]:
-            print(f"   - {url[:100]}...")
 
     if stream_urls:
         # Filtra per trovare il flusso migliore
         best_url = None
-        
-        # Cerca prima URL con "cielo" o "TACT" o "akamaized"
         for url in stream_urls:
             if any(keyword in url.lower() for keyword in ["cielo", "tact", "akamaized", "hlslive"]):
                 best_url = url
-                print(f"✅ Trovato URL prioritario: {best_url}")
                 break
         
-        # Se non trova quello specifico, usa il primo trovato
-        if not best_url and stream_urls:
+        if not best_url:
             best_url = stream_urls[0]
-            print(f"✅ Usando primo URL trovato: {best_url}")
         
+        print(f"\n✅ STREAM SALVATO:\n{best_url}")
         with open("cielo.txt", "w", encoding="utf-8") as f:
             f.write(best_url + "\n")
-        print(f"\n✅ STREAM SALVATO:\n{best_url}")
     else:
-        print("\n❌ Nessun stream trovato. Riproverò al prossimo ciclo.")
+        print("\n❌ Nessun stream trovato.")
         with open("cielo.txt", "w", encoding="utf-8") as f:
-            f.write("Nessun stream trovato. Riprovo al prossimo aggiornamento.\n")
+            f.write("Nessun stream trovato.\n")
 
 if __name__ == "__main__":
     main()
